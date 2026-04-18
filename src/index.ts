@@ -37,8 +37,9 @@ async function start() {
   console.log('✓ Redis connected');
 
   // ── Start server ──────────────────────────────────────────────
-  await app.listen({ port: config.port, host: '0.0.0.0' });
-  console.log(`\n🌍 Global Dial-In AI running on port ${config.port}`);
+  const port = Number(process.env.PORT) || config.port || 3000;
+  await app.listen({ port, host: '0.0.0.0' });
+  console.log(`\n🌍 Running on port ${port}`);
   console.log(`   Twilio voice webhook: ${config.publicUrl}/twilio/voice`);
   console.log(`   Media stream:         wss://${new URL(config.publicUrl).host}/twilio/stream`);
   console.log(`   Health check:         ${config.publicUrl}/health\n`);
