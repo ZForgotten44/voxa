@@ -1,5 +1,6 @@
 // src/modules/orchestrator/index.ts
 import OpenAI from 'openai';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { config } from '../../config';
 import { buildSystemPrompt, buildMenuMessage, getLanguageName } from '../../prompts';
 import type { CallState, Mode } from '../../types';
@@ -16,12 +17,9 @@ const DTMF_MODES: Record<string, Mode> = {
   '1': 'general',
   '2': 'tutor',
   '3': 'practice',
-  '4': 'general', // language change — handled separately
+  '4': 'general',
 };
 
-/**
- * Main orchestration: takes user speech + call state, returns AI reply + new state.
- */
 export async function orchestrate(
   userInput: string,
   state: CallState,
@@ -29,20 +27,16 @@ export async function orchestrate(
 ): Promise<OrchestratorResult> {
   const start = Date.now();
 
-  // ── DTMF / digit detection ────────────────────────────────────
   const digit = userInput.trim();
   if (/^[1-4]$/.test(digit)) {
     return handleDtmf(digit, state, start);
   }
 
-  // ── Language switch detection ─────────────────────────────────
   let lang = state.language;
-  // If Whisper detected a different language with high confidence, switch
   if (detectedLanguage && detectedLanguage !== 'en' && detectedLanguage !== state.language) {
     lang = detectedLanguage;
   }
 
-  // ── Mode detection from natural speech ───────────────────────
   const mode = await detectModeIfNeeded(userInput, state);
 
   const updatedState: CallState = {
@@ -53,34 +47,36 @@ export async function orchestrate(
     history: [
       ...state.history,
       { role: 'user', content: userInput },
-    ].slice(-20), // keep last 20 turns in memory
+    ].slice(-20),
   };
 
-  // ── Build system prompt ───────────────────────────────────────
   const systemPrompt = buildSystemPrompt({
     language: lang,
     languageName: getLanguageName(lang),
     mode,
     nickname: state.nickname,
-    recentSummary: null, // already baked in at call start
+    recentSummary: null,
     turnCount: state.turnCount,
   });
 
-  // ── Call GPT-4o ───────────────────────────────────────────────
   try {
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      ...updatedState.history.map((msg) => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+      })),
+    ];
+
     const completion = await openai.chat.completions.create({
       model: config.openai.chatModel,
-      max_tokens: 120, // short for voice — about 3 spoken sentences
+      max_tokens: 120,
       temperature: 0.7,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        ...updatedState.history as any,
-      ],
+      messages,
     });
 
     const reply = completion.choices[0]?.message?.content?.trim() ?? buildFallback(lang);
 
-    // Add AI reply to history
     updatedState.history.push({ role: 'assistant', content: reply });
 
     return { reply, updatedState, latencyMs: Date.now() - start };
@@ -125,15 +121,10 @@ function getModeIntro(mode: Mode): string {
   }
 }
 
-/**
- * Ask GPT to classify intent if we're still in initial mode.
- * Only runs on the first few turns to avoid overhead.
- */
 async function detectModeIfNeeded(input: string, state: CallState): Promise<Mode> {
-  if (state.turnCount > 3) return state.mode; // already established
+  if (state.turnCount > 3) return state.mode;
   if (state.mode !== 'general') return state.mode;
 
-  // Quick keyword-based classification (fast, no extra API call)
   const lower = input.toLowerCase();
   if (/translat|how do (i|you) say|what does .* mean in|في اللغة|ترجم/.test(lower)) return 'translate';
   if (/teach|learn|lesson|explain|tutor|study|quiz|homework|درس|تعلم/.test(lower)) return 'tutor';
@@ -152,10 +143,10 @@ function buildFallback(lang: string): string {
   return fallbacks[lang] ?? 'Sorry, I didn\'t catch that. Could you repeat that slowly?';
 }
 
-/**
- * Generate a session summary for SMS and storage.
- */
-export async function generateSummary(history: Array<{ role: string; content: string }>, language: string): Promise<string> {
+export async function generateSummary(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  language: string
+): Promise<string> {
   if (history.length < 2) return 'Short session.';
   try {
     const completion = await openai.chat.completions.create({
