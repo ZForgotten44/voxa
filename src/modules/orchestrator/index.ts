@@ -40,16 +40,16 @@ export async function orchestrate(
   const mode = await detectModeIfNeeded(userInput, state);
 
   const updatedState: CallState = {
-    ...state,
-    language: lang,
-    mode,
-    turnCount: state.turnCount + 1,
-    history: [
-      ...state.history,
-      { role: 'user', content: userInput },
-    ].slice(-20),
-  };
-
+  ...state,
+  language: lang,
+  mode,
+  turnCount: state.turnCount + 1,
+  history: [
+    ...state.history,
+    { role: 'user' as 'user', content: userInput },
+  ].slice(-20),
+};
+  
   const systemPrompt = buildSystemPrompt({
     language: lang,
     languageName: getLanguageName(lang),
