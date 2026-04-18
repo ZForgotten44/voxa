@@ -29,22 +29,21 @@ async function start() {
   // ── Telephony routes ──────────────────────────────────────────
   await registerTelephonyRoutes(app);
 
-  // ── Connect to DB and Redis ───────────────────────────────────
-  await db.connect();
-  console.log('✓ Postgres connected');
+const port = Number(process.env.PORT) || config.port || 3000;
 
-  await redis.connect();
-  console.log('✓ Redis connected');
+await app.listen({ port, host: '0.0.0.0' });
 
-  // ── Start server ──────────────────────────────────────────────
-  const port = Number(process.env.PORT) || config.port || 3000;
-  await app.listen({ port, host: '0.0.0.0' });
-  console.log(`\n🌍 Running on port ${port}`);
-  console.log(`   Twilio voice webhook: ${config.publicUrl}/twilio/voice`);
-  console.log(`   Media stream:         wss://${new URL(config.publicUrl).host}/twilio/stream`);
-  console.log(`   Health check:         ${config.publicUrl}/health\n`);
-}
+console.log(`🌍 Running on port ${port}`);
 
+// connect async AFTER server is live
+db.connect()
+  .then(() => console.log('✓ Postgres connected'))
+  .catch(err => console.error('Postgres failed:', err));
+
+redis.connect()
+  .then(() => console.log('✓ Redis connected'))
+  .catch(err => console.error('Redis failed:', err));
+  
 start().catch(err => {
   console.error('Fatal startup error:', err);
   process.exit(1);
